@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 
 	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 )
 
 // ErrFileInUse is returned when attempting to remove or close a TSM file that is still being used.
@@ -40,6 +41,9 @@ type TSMReader struct {
 
 	// deleteMu limits concurrent deletes
 	deleteMu sync.Mutex
+
+	// limiter rate limits page faults by the underlying memory maps.
+	limiter *rate.Limiter
 }
 
 type tsmReaderOption func(*TSMReader)
@@ -48,6 +52,12 @@ type tsmReaderOption func(*TSMReader)
 var WithMadviseWillNeed = func(willNeed bool) tsmReaderOption {
 	return func(r *TSMReader) {
 		r.madviseWillNeed = willNeed
+	}
+}
+
+var WithTSMReaderLimiter = func(limiter *rate.Limiter) tsmReaderOption {
+	return func(r *TSMReader) {
+		r.limiter = limiter
 	}
 }
 
@@ -72,17 +82,23 @@ func NewTSMReader(f *os.File, options ...tsmReaderOption) (*TSMReader, error) {
 	}
 	t.size = stat.Size()
 	t.lastModified = stat.ModTime().UnixNano()
-	t.accessor = &mmapAccessor{
+	accessor := &mmapAccessor{
 		logger:       t.logger,
 		f:            f,
 		mmapWillNeed: t.madviseWillNeed,
 	}
 
-	index, err := t.accessor.init()
+	index, err := accessor.init()
 	if err != nil {
 		return nil, err
 	}
 
+	// Set a limiter if passed in through options.
+	if t.limiter != nil {
+		accessor.limiter = mincore.NewLimiter(t.limiter, accessor.b)
+	}
+
+	t.accessor = accessor
 	t.index = index
 	t.tombstoner = NewTombstoner(t.Path(), index.MaybeContainsKey)
 

@@ -273,6 +273,10 @@ func (e *Engine) WithFileStoreObserver(obs FileStoreObserver) {
 	e.FileStore.WithObserver(obs)
 }
 
+func (e *Engine) WithLimiter(obs FileStoreObserver) {
+	e.FileStore.WithObserver(obs)
+}
+
 func (e *Engine) WithCompactionPlanner(planner CompactionPlanner) {
 	planner.SetFileStore(e.FileStore)
 	e.CompactionPlan = planner

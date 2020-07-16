@@ -25,6 +25,7 @@ import (
 	"github.com/influxdata/influxdb/v2/tsdb/cursors"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
+	"golang.org/x/time/rate"
 )
 
 const (
@@ -290,6 +291,11 @@ func (f *FileStore) ParseFileName(path string) (int, int, error) {
 // SetCurrentGenerationFunc must be set before using FileStore.
 func (f *FileStore) SetCurrentGenerationFunc(fn func() int) {
 	f.currentGenerationFunc = fn
+}
+
+// WithLimiter sets the rate limiter used for limiting page faults.
+func (f *FileStore) WithLimiter(limiter *rate.Limiter) {
+	f.limiter = limiter
 }
 
 // WithLogger sets the logger on the file store.
@@ -670,6 +676,7 @@ func (f *FileStore) Open(ctx context.Context) error {
 			start := time.Now()
 			df, err := NewTSMReader(file,
 				WithMadviseWillNeed(f.tsmMMAPWillNeed),
+				WithTSMReaderLimiter(f.limiter),
 				WithTSMReaderLogger(f.logger))
 			f.logger.Info("Opened file",
 				zap.String("path", file.Name()),
@@ -911,6 +918,7 @@ func (f *FileStore) replace(oldFiles, newFiles []string, updatedFn func(r []TSMF
 
 		tsm, err := NewTSMReader(fd,
 			WithMadviseWillNeed(f.tsmMMAPWillNeed),
+			WithTSMReaderLimiter(f.limiter),
 			WithTSMReaderLogger(f.logger))
 		if err != nil {
 			return err
